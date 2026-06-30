@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scan Stok Catering</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      margin: 0;
+      padding: 16px;
+      background: #f4f6f8;
+    }
+    h2 { text-align: center; color: #2c3e50; margin-bottom: 4px; }
+    .subtitle { text-align: center; color: #7f8c8d; font-size: 13px; margin-bottom: 16px; }
+
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 12px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+    }
+
+    label { font-size: 13px; font-weight: 600; color: #34495e; display: block; margin-bottom: 6px; }
+    select, input {
+      width: 100%;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #dcdcdc;
+      font-size: 15px;
+      margin-bottom: 12px;
+      box-sizing: border-box;
+    }
+
+    .mode-toggle { display: flex; gap: 8px; margin-bottom: 12px; }
+    .mode-btn {
+      flex: 1; padding: 12px; border-radius: 8px; border: 2px solid #ddd;
+      background: white; font-weight: 600; cursor: pointer; font-size: 14px;
+    }
+    .mode-btn.active-masuk { background: #27ae60; color: white; border-color: #27ae60; }
+    .mode-btn.active-keluar { background: #e74c3c; color: white; border-color: #e74c3c; }
+
+    #reader { width: 100%; border-radius: 8px; overflow: hidden; }
+
+    .hasil-item {
+      background: #eafaf1; border: 1px solid #2ecc71; border-radius: 8px;
+      padding: 12px; margin-bottom: 12px; display: none;
+    }
+    .hasil-item.error { background: #fdecea; border-color: #e74c3c; }
+    .hasil-item .nama { font-weight: 700; font-size: 16px; color: #2c3e50; }
+    .hasil-item .meta { font-size: 13px; color: #555; margin-top: 2px; }
+
+    button.submit {
+      width: 100%; padding: 14px; border: none; border-radius: 8px;
+      background: #2980b9; color: white; font-size: 16px; font-weight: 700;
+      cursor: pointer; margin-top: 4px;
+    }
+    button.submit:disabled { background: #bdc3c7; }
+
+    #statusMsg { text-align: center; margin-top: 10px; font-size: 14px; font-weight: 600; }
+    #statusMsg.sukses { color: #27ae60; }
+    #statusMsg.gagal { color: #e74c3c; }
+
+    .riwayat { font-size: 12px; color: #7f8c8d; max-height: 120px; overflow-y: auto; }
+    .riwayat div { padding: 4px 0; border-bottom: 1px solid #eee; }
+  </style>
+</head>
+<body>
+
+  <h2>📦 Scan Stok Catering</h2>
+  <div class="subtitle">Arahkan kamera ke QR Code item</div>
+
+  <div class="card">
+    <label>Pilih Cabang</label>
+    <select id="cabang"></select>
+
+    <label>Jenis Transaksi</label>
+    <div class="mode-toggle">
+      <button class="mode-btn active-masuk" id="btnMasuk" onclick="setJenis('masuk')">⬇️ Stok Masuk</button>
+      <button class="mode-btn" id="btnKeluar" onclick="setJenis('keluar')">⬆️ Stok Keluar</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div id="reader"></div>
+  </div>
+
+  <div class="card hasil-item" id="hasilItem">
+    <div class="nama" id="namaItem">-</div>
+    <div class="meta" id="metaItem">-</div>
+    <label style="margin-top:10px;">Jumlah (Qty)</label>
+    <input type="number" id="qtyInput" min="0.01" step="0.01" placeholder="Masukkan jumlah...">
+    <button class="submit" id="btnSubmit" onclick="kirimData()">Simpan</button>
+    <div id="statusMsg"></div>
+  </div>
+
+  <div class="card">
+    <label>Riwayat Scan Terakhir (sesi ini)</label>
+    <div class="riwayat" id="riwayat"><i>Belum ada scan</i></div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+  <script>
+    // ============================================
+    // [TAMBAH] GANTI INI dengan URL Apps Script Anda (diakhiri /exec)
+    // ============================================
+    const API_URL = "GANTI_DENGAN_URL_APPS_SCRIPT_ANDA/exec";
+
+    let jenisTransaksi = 'masuk';
+    let itemSaatIni = null;
+    let scannerAktif = true;
+
+    // [GANTI] Sebelumnya pakai google.script.run, sekarang pakai fetch() biasa
+    fetch(API_URL + "?action=getCabang")
+      .then(res => res.json())
+      .then(hasil => {
+        const sel = document.getElementById('cabang');
+        hasil.data.forEach(c => {
+          const opt = document.createElement('option');
+          opt.value = c; opt.textContent = c;
+          sel.appendChild(opt);
+        });
+      });
+
+    function setJenis(jenis) {
+      jenisTransaksi = jenis;
+      document.getElementById('btnMasuk').classList.toggle('active-masuk', jenis === 'masuk');
+      document.getElementById('btnKeluar').classList.toggle('active-keluar', jenis === 'keluar');
+    }
+
+    function onScanSuccess(kodeHasilScan) {
+      if (!scannerAktif) return;
+      scannerAktif = false;
+
+      // [GANTI] Pakai fetch GET untuk cari item (request GET aman dari soal CORS)
+      fetch(API_URL + "?action=cariItem&kode=" + encodeURIComponent(kodeHasilScan))
+        .then(res => res.json())
+        .then(hasil => {
+          const box = document.getElementById('hasilItem');
+          box.style.display = 'block';
+          if (hasil.sukses) {
+            box.classList.remove('error');
+            itemSaatIni = hasil;
+            document.getElementById('namaItem').textContent = hasil.nama;
+            document.getElementById('metaItem').textContent = "Kode: " + hasil.kode + " · Satuan: " + hasil.satuan;
+            document.getElementById('qtyInput').value = '';
+            document.getElementById('qtyInput').focus();
+          } else {
+            box.classList.add('error');
+            document.getElementById('namaItem').textContent = "Item tidak ditemukan";
+            document.getElementById('metaItem').textContent = hasil.pesan;
+            itemSaatIni = null;
+          }
+        })
+        .catch(err => {
+          alert('Gagal menghubungi server: ' + err);
+          scannerAktif = true;
+        });
+    }
+
+    function kirimData() {
+      const qty = document.getElementById('qtyInput').value;
+      if (!itemSaatIni) { alert('Item belum valid.'); return; }
+      if (!qty || qty <= 0) { alert('Masukkan jumlah yang valid.'); return; }
+
+      const cabang = document.getElementById('cabang').value;
+      const btn = document.getElementById('btnSubmit');
+      btn.disabled = true;
+      btn.textContent = 'Menyimpan...';
+
+      const payload = {
+        kode: itemSaatIni.kode,
+        nama: itemSaatIni.nama,
+        satuan: itemSaatIni.satuan,
+        qty: qty,
+        cabang: cabang,
+        jenis: jenisTransaksi
+      };
+
+      // [GANTI] Pakai fetch POST dengan content-type text/plain
+      // (PENTING: text/plain dipakai supaya browser tidak mengirim "preflight request" OPTIONS,
+      // karena Apps Script tidak bisa membalas preflight request itu)
+      fetch(API_URL + "?action=simpanTransaksi", {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(payload)
+      })
+        .then(res => res.json())
+        .then(res => {
+          const statusEl = document.getElementById('statusMsg');
+          btn.disabled = false;
+          btn.textContent = 'Simpan';
+          if (res.sukses) {
+            statusEl.textContent = '✅ ' + res.pesan;
+            statusEl.className = 'sukses';
+            tambahRiwayat(itemSaatIni.nama, qty, jenisTransaksi);
+            setTimeout(() => {
+              document.getElementById('hasilItem').style.display = 'none';
+              statusEl.textContent = '';
+              scannerAktif = true;
+            }, 1200);
+          } else {
+            statusEl.textContent = '❌ ' + res.pesan;
+            statusEl.className = 'gagal';
+            scannerAktif = true;
+          }
+        })
+        .catch(err => {
+          btn.disabled = false;
+          btn.textContent = 'Simpan';
+          alert('Gagal menyimpan: ' + err);
+          scannerAktif = true;
+        });
+    }
+
+    function tambahRiwayat(nama, qty, jenis) {
+      const div = document.getElementById('riwayat');
+      if (div.querySelector('i')) div.innerHTML = '';
+      const item = document.createElement('div');
+      const ikon = jenis === 'masuk' ? '⬇️' : '⬆️';
+      item.textContent = ikon + ' ' + nama + ' — ' + qty + ' (' + new Date().toLocaleTimeString() + ')';
+      div.prepend(item);
+    }
+
+    const html5QrCode = new Html5Qrcode("reader");
+    html5QrCode.start(
+      { facingMode: "environment" },
+      { fps: 10, qrbox: 220 },
+      onScanSuccess
+    ).catch(err => {
+      document.getElementById('reader').innerHTML =
+        '<p style="color:red;text-align:center;">Gagal mengakses kamera. Pastikan izin kamera diaktifkan dan dibuka via HTTPS.</p>';
+    });
+  </script>
+
+</body>
+</html>
