@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html>
 <head>
@@ -51,6 +52,26 @@
     .hasil-item .nama { font-weight: 700; font-size: 16px; color: #2c3e50; }
     .hasil-item .meta { font-size: 13px; color: #555; margin-top: 2px; }
 
+    /* [TAMBAH] Banner konfirmasi saat stok tidak cukup */
+    .konfirmasi-box {
+      background: #fff8e1; border: 1px solid #f1c40f; border-radius: 8px;
+      padding: 12px; margin-bottom: 12px; display: none;
+    }
+    .konfirmasi-box p { margin: 0 0 10px 0; font-size: 14px; color: #7d6608; font-weight: 600; }
+    .konfirmasi-tombol { display: flex; gap: 8px; }
+    .konfirmasi-tombol button {
+      flex: 1; padding: 10px; border-radius: 8px; border: none; font-weight: 700; cursor: pointer;
+    }
+    .btn-batal { background: #ecf0f1; color: #2c3e50; }
+    .btn-lanjut { background: #e67e22; color: white; }
+
+    /* [TAMBAH] Banner peringatan stok menipis */
+    .peringatan-box {
+      background: #fdecea; border: 1px solid #e74c3c; border-radius: 8px;
+      padding: 12px; margin-bottom: 12px; display: none; font-size: 13px;
+      color: #c0392b; font-weight: 600;
+    }
+
     button.submit {
       width: 100%; padding: 14px; border: none; border-radius: 8px;
       background: #2980b9; color: white; font-size: 16px; font-weight: 700;
@@ -86,12 +107,25 @@
     <div id="reader"></div>
   </div>
 
+  <!-- [TAMBAH] Banner peringatan stok menipis (muncul setelah transaksi berhasil) -->
+  <div class="peringatan-box" id="peringatanBox"></div>
+
   <div class="card hasil-item" id="hasilItem">
     <div class="nama" id="namaItem">-</div>
     <div class="meta" id="metaItem">-</div>
     <label style="margin-top:10px;">Jumlah (Qty)</label>
     <input type="number" id="qtyInput" min="0.01" step="0.01" placeholder="Masukkan jumlah...">
-    <button class="submit" id="btnSubmit" onclick="kirimData()">Simpan</button>
+
+    <!-- [TAMBAH] Box konfirmasi kalau stok kurang -->
+    <div class="konfirmasi-box" id="konfirmasiBox">
+      <p id="pesanKonfirmasi"></p>
+      <div class="konfirmasi-tombol">
+        <button class="btn-batal" onclick="batalkanKonfirmasi()">Batal</button>
+        <button class="btn-lanjut" onclick="kirimData(true)">Tetap Lanjutkan</button>
+      </div>
+    </div>
+
+    <button class="submit" id="btnSubmit" onclick="kirimData(false)">Simpan</button>
     <div id="statusMsg"></div>
   </div>
 
@@ -102,16 +136,12 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
   <script>
-    // ============================================
-    // [TAMBAH] GANTI INI dengan URL Apps Script Anda (diakhiri /exec)
-    // ============================================
-    const API_URL = "https://script.google.com/macros/s/AKfycbwfq4jiuR_XxU_00nh5nqUFznydeWIcLaegneImRG11MLPuaVO7Uk1M_eYD6ZSajnMIkg/exec";
+    const API_URL = "GANTI_DENGAN_URL_APPS_SCRIPT_ANDA/exec";
 
     let jenisTransaksi = 'masuk';
     let itemSaatIni = null;
     let scannerAktif = true;
 
-    // [GANTI] Sebelumnya pakai google.script.run, sekarang pakai fetch() biasa
     fetch(API_URL + "?action=getCabang")
       .then(res => res.json())
       .then(hasil => {
@@ -133,12 +163,13 @@
       if (!scannerAktif) return;
       scannerAktif = false;
 
-      // [GANTI] Pakai fetch GET untuk cari item (request GET aman dari soal CORS)
       fetch(API_URL + "?action=cariItem&kode=" + encodeURIComponent(kodeHasilScan))
         .then(res => res.json())
         .then(hasil => {
           const box = document.getElementById('hasilItem');
           box.style.display = 'block';
+          document.getElementById('konfirmasiBox').style.display = 'none'; // [TAMBAH] reset konfirmasi tiap scan baru
+          document.getElementById('btnSubmit').style.display = 'block';
           if (hasil.sukses) {
             box.classList.remove('error');
             itemSaatIni = hasil;
@@ -159,7 +190,16 @@
         });
     }
 
-    function kirimData() {
+    // [TAMBAH] fungsi batal konfirmasi
+    function batalkanKonfirmasi() {
+      document.getElementById('konfirmasiBox').style.display = 'none';
+      document.getElementById('btnSubmit').style.display = 'block';
+      document.getElementById('btnSubmit').disabled = false;
+      scannerAktif = true;
+    }
+
+    // [GANTI] kirimData sekarang menerima parameter "paksa" untuk skip validasi stok
+    function kirimData(paksa) {
       const qty = document.getElementById('qtyInput').value;
       if (!itemSaatIni) { alert('Item belum valid.'); return; }
       if (!qty || qty <= 0) { alert('Masukkan jumlah yang valid.'); return; }
@@ -175,12 +215,10 @@
         satuan: itemSaatIni.satuan,
         qty: qty,
         cabang: cabang,
-        jenis: jenisTransaksi
+        jenis: jenisTransaksi,
+        paksa: paksa // [TAMBAH]
       };
 
-      // [GANTI] Pakai fetch POST dengan content-type text/plain
-      // (PENTING: text/plain dipakai supaya browser tidak mengirim "preflight request" OPTIONS,
-      // karena Apps Script tidak bisa membalas preflight request itu)
       fetch(API_URL + "?action=simpanTransaksi", {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
@@ -189,17 +227,39 @@
         .then(res => res.json())
         .then(res => {
           const statusEl = document.getElementById('statusMsg');
-          btn.disabled = false;
           btn.textContent = 'Simpan';
+
+          // [TAMBAH] Kalau perlu konfirmasi (stok kurang), tampilkan box konfirmasi, jangan simpan dulu
+          if (res.perluKonfirmasi) {
+            document.getElementById('pesanKonfirmasi').textContent = res.pesan;
+            document.getElementById('konfirmasiBox').style.display = 'block';
+            btn.style.display = 'none';
+            return;
+          }
+
+          btn.disabled = false;
+          document.getElementById('konfirmasiBox').style.display = 'none';
+          btn.style.display = 'block';
+
           if (res.sukses) {
             statusEl.textContent = '✅ ' + res.pesan;
             statusEl.className = 'sukses';
             tambahRiwayat(itemSaatIni.nama, qty, jenisTransaksi);
+
+            // [TAMBAH] Tampilkan peringatan stok menipis kalau ada
+            const peringatanBox = document.getElementById('peringatanBox');
+            if (res.peringatanStokMenipis) {
+              peringatanBox.textContent = res.pesanPeringatan;
+              peringatanBox.style.display = 'block';
+            } else {
+              peringatanBox.style.display = 'none';
+            }
+
             setTimeout(() => {
               document.getElementById('hasilItem').style.display = 'none';
               statusEl.textContent = '';
               scannerAktif = true;
-            }, 1200);
+            }, 1500);
           } else {
             statusEl.textContent = '❌ ' + res.pesan;
             statusEl.className = 'gagal';
